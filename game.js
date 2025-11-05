@@ -31,6 +31,20 @@ function getPortalSize(time){
   return PORTAL_W;
 }
 
+function getHelpMsg(time,mode){
+  if(time<20){
+    return mode===0?'Go through colored stripes!':'MATCH YOUR COLOR!';
+  }else if(time<30){
+    return mode===0?'Watch out! Portals can move!':'Moving portals incoming!';
+  }else if(time<40){
+    return mode===0?'Tiny portals appear!':'Small targets ahead!';
+  }else if(time<50){
+    return mode===0?'Some portals play tricks...':'Troll portals active!';
+  }else{
+    return mode===0?'Chaos mode! Anything goes!':'SURVIVE THE MADNESS!';
+  }
+}
+
 function create(){
   this.g=this.add.graphics();
   cam=this.cameras.main;
@@ -234,6 +248,9 @@ function update(_,dt){
   }
 
   draw();
+
+  // Update help message dynamically
+  txts.help.setText(getHelpMsg(t,m));
 
   if(m===0){
     if(p1)txts.p1sc.setText(`Score: ${p1.sc}`);
@@ -488,11 +505,11 @@ function showGame(){
   hideAll();
   if(m===0){
     txts.p1sc.setVisible(1);
-    txts.help.setVisible(1).setText('Go through colored stripes!');
+    txts.help.setVisible(1);
   }else{
     txts.p1sc.setVisible(1);
     txts.p2sc.setVisible(1);
-    txts.help.setVisible(1).setText('MATCH YOUR COLOR!');
+    txts.help.setVisible(1);
   }
   txts.timer.setVisible(1);
   txts.menu.setVisible(1);
