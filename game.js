@@ -18,11 +18,17 @@ function blendColor(c1,c2,f){
   return(r<<16)|(g<<8)|b;
 }
 
-function getPortalSize(){
-  const r=Math.random();
-  if(r<0.05)return MAX_PORTAL; // 5% full-width (joke mode)
-  if(r<0.75)return PORTAL_W; // 70% normal size
-  return MIN_PORTAL+Math.random()*(PORTAL_W-MIN_PORTAL)*0.7; // 25% small
+function getPortalSize(time){
+  // Full-width joke portals only after 40s (5% chance)
+  if(time>40&&Math.random()<0.05)return MAX_PORTAL;
+
+  // Small portals only after 30s (25% chance when available)
+  if(time>30&&Math.random()<0.25){
+    return MIN_PORTAL+Math.random()*(PORTAL_W-MIN_PORTAL)*0.7;
+  }
+
+  // Standard size (default)
+  return PORTAL_W;
 }
 
 function create(){
@@ -108,14 +114,28 @@ function update(_,dt){
         }
       }
 
-      // Troll portal: moves away when player approaches
+      // Troll portal: moves away when player approaches (but stays reachable)
       if(pt.troll&&!pt.trollActive){
         const distY=Math.abs(w.y-p1.y);
         const distX=Math.abs(pt.x+pt.w/2-p1.x);
         if(distY<TROLL_DIST&&distX<80){
           pt.trollActive=1;
-          pt.vx=(p1.x<pt.x?1:-1)*(baseSpeed*2.5); // Move away fast
+          // Move to nearby position (not too far)
+          const direction=(p1.x<pt.x?1:-1);
+          const moveDistance=80+Math.random()*60; // 80-140px away
+          const targetX=pt.x+direction*moveDistance;
+          // Ensure it stays within bounds
+          pt.targetX=Math.max(60,Math.min(W-pt.w-60,targetX));
+          pt.vx=direction*baseSpeed*1.5; // Moderate speed
           tone(800,80); // Troll sound
+        }
+      }
+      // Stop troll portal when it reaches target
+      if(pt.trollActive&&pt.targetX){
+        if((pt.vx>0&&pt.x>=pt.targetX)||(pt.vx<0&&pt.x<=pt.targetX)){
+          pt.x=pt.targetX;
+          pt.vx=0;
+          pt.targetX=null;
         }
       }
     }
@@ -226,22 +246,22 @@ function update(_,dt){
 }
 
 function spawnWall(){
-  // Variable portal size system
-  let portalSize=getPortalSize();
+  // Variable portal size system based on time
+  let portalSize=getPortalSize(t);
 
-  // Apply progressive shrinking after 40s (only to normal portals)
+  // Apply progressive shrinking after 40s (only to standard portals)
   if(t>40&&portalSize===PORTAL_W){
     const shrinkFactor=Math.min((t-40)*0.6,PORTAL_W-20);
     portalSize=Math.max(20,PORTAL_W-shrinkFactor);
   }
 
-  // Decide if portals should move - starts at 10s, increase probability over time
-  const moveProb=t>10?Math.min(0.15+(t-10)*0.005,0.4):0;
+  // Decide if portals should move - starts at 20s, increase probability over time
+  const moveProb=t>20?Math.min(0.15+(t-20)*0.005,0.4):0;
   const shouldMove=Math.random()<moveProb;
   const moveSpeed=shouldMove?(Math.random()*1.2+0.4)*(Math.random()<0.5?1:-1):0;
 
-  // Troll portal (only for non-full-width portals)
-  const isTroll=portalSize<MAX_PORTAL&&Math.random()<TROLL_PROB;
+  // Troll portal only after 40s and only for standard-size portals (not small, not joke)
+  const isTroll=t>40&&portalSize===PORTAL_W&&Math.random()<TROLL_PROB;
 
   if(m===0){
     // 1P: Single portal in random position
