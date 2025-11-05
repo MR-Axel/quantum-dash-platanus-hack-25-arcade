@@ -2,6 +2,9 @@
 const W=800,H=600,STICK_H=50,STICK_W=6,WALL_SPACING=280,PORTAL_W=100,WALL_THICK=8;
 let sc=0,m=0,p1,p2,walls=[],cam,g,spd=2.5,t=0,colors=[0x00ffff,0xff00ff,0xffff00,0xff0000,0x00ff00],nextId=0,snd,txts={},baseSpeed=4;
 
+const P1_COLOR=0x00ccff; // Cyan for P1
+const P2_COLOR=0xff9900; // Orange for P2
+
 const cfg={type:Phaser.AUTO,width:W,height:H,backgroundColor:'#000',scene:{create,update}};
 new Phaser.Game(cfg);
 
@@ -16,7 +19,7 @@ function create(){
   txts.opt1=this.add.text(W/2,H/2+40,'Press 1 for ONE PLAYER',{fontSize:'28px',color:'#0af',fontFamily:'monospace'}).setOrigin(0.5);
   txts.opt2=this.add.text(W/2,H/2+80,'Press 2 for TWO PLAYERS',{fontSize:'28px',color:'#f90',fontFamily:'monospace'}).setOrigin(0.5);
   txts.hint1=this.add.text(W/2,H/2+140,'Go through COLORED portal!',{fontSize:'18px',color:'#ff0',fontFamily:'monospace'}).setOrigin(0.5);
-  txts.hint2=this.add.text(W/2,H/2+165,'2P: BOTH must pass or other wins!',{fontSize:'16px',color:'#aaa',fontFamily:'monospace'}).setOrigin(0.5);
+  txts.hint2=this.add.text(W/2,H/2+165,'2P: Each color for each player!',{fontSize:'16px',color:'#aaa',fontFamily:'monospace'}).setOrigin(0.5);
   txts.hint3=this.add.text(W/2,H/2+190,'Hit wall = DEATH!',{fontSize:'18px',color:'#f55',fontFamily:'monospace'}).setOrigin(0.5);
   txts.ctrl=this.add.text(W/2,H-40,'P1: ← → | P2: A D',{fontSize:'16px',color:'#888',fontFamily:'monospace'}).setOrigin(0.5);
   txts.p1sc=this.add.text(20,20,'',{fontSize:'20px',color:'#0af',fontFamily:'monospace'}).setOrigin(0);
@@ -47,8 +50,7 @@ function start(s,mode){
   else p2=null;
 
   // First wall
-  walls.push({y:-100,portalX:W/2-PORTAL_W/2,portalW:PORTAL_W,col:colors[0],id:nextId,safe:1,p1hit:0,p2hit:0});
-  nextId++;
+  spawnWall();
 
   hideAll();
   showGame();
@@ -61,15 +63,15 @@ function update(_,dt){
   t+=dt*0.001;
 
   // Progressive difficulty - SLOWER acceleration
-  if(t>10)spd=2.5+t*0.08;  // Reduced from 0.15
-  if(spd>6)spd=6;  // Reduced max from 8
+  if(t>10)spd=2.5+t*0.08;
+  if(spd>6)spd=6;
 
   // Player speed also increases SLOWER
-  if(t>10)baseSpeed=4+t*0.05;  // Reduced from 0.1
-  if(baseSpeed>7)baseSpeed=7;  // Reduced max from 9
+  if(t>10)baseSpeed=4+t*0.05;
+  if(baseSpeed>7)baseSpeed=7;
 
   // Reduce wall spacing as game progresses SLOWER
-  const currentSpacing=Math.max(220,WALL_SPACING-t*2);  // Reduced from 3
+  const currentSpacing=Math.max(220,WALL_SPACING-t*2);
 
   if(walls.length===0||walls[walls.length-1].y>currentSpacing)spawnWall();
 
@@ -140,14 +142,44 @@ function update(_,dt){
 }
 
 function spawnWall(){
-  const minX=50;
-  const maxX=W-PORTAL_W-50;
-  const portalX=minX+Math.random()*(maxX-minX);
+  if(m===0){
+    // 1P: Single portal in random position
+    const minX=50;
+    const maxX=W-PORTAL_W-50;
+    const portalX=minX+Math.random()*(maxX-minX);
+    const prevSafe=walls.length>0?walls.find(w=>w.safe):null;
+    const col=prevSafe?prevSafe.col:colors[Math.floor(Math.random()*colors.length)];
 
-  const prevSafe=walls.length>0?walls.find(w=>w.safe):null;
-  const col=prevSafe?prevSafe.col:colors[Math.floor(Math.random()*colors.length)];
+    walls.push({
+      y:-50,
+      portals:[{x:portalX,w:PORTAL_W,col,forP1:1,forP2:0}],
+      id:nextId,
+      p1hit:0,
+      p2hit:0
+    });
+  }else{
+    // 2P: Two portals, one for each player
+    const minX=80;
+    const maxX=W-PORTAL_W-80;
 
-  walls.push({y:-50,portalX,portalW:PORTAL_W,col,id:nextId,safe:1,p1hit:0,p2hit:0});
+    // Generate two random positions ensuring they don't overlap
+    let p1X,p2X;
+    do{
+      p1X=minX+Math.random()*(maxX-minX);
+      p2X=minX+Math.random()*(maxX-minX);
+    }while(Math.abs(p1X-p2X)<PORTAL_W+20);
+
+    walls.push({
+      y:-50,
+      portals:[
+        {x:p1X,w:PORTAL_W,col:P1_COLOR,forP1:1,forP2:0},
+        {x:p2X,w:PORTAL_W,col:P2_COLOR,forP1:0,forP2:1}
+      ],
+      id:nextId,
+      p1hit:0,
+      p2hit:0
+    });
+  }
   nextId++;
 }
 
@@ -163,9 +195,24 @@ function upd(p,playerNum){
     const alreadyHit=playerNum===1?w.p1hit:w.p2hit;
 
     if(Math.abs(w.y-p.y)<25&&!alreadyHit){
-      // Check if passed through portal (safe)
-      if(p.x>w.portalX&&p.x<w.portalX+w.portalW){
-        // Mark this player as passed
+      let hitCorrectPortal=0;
+      let hitWrongPortal=0;
+
+      // Check each portal
+      for(let portal of w.portals){
+        if(p.x>portal.x&&p.x<portal.x+portal.w){
+          // Player is in this portal
+          if((playerNum===1&&portal.forP1)||(playerNum===2&&portal.forP2)){
+            hitCorrectPortal=1;
+          }else{
+            hitWrongPortal=1;
+          }
+          break;
+        }
+      }
+
+      if(hitCorrectPortal){
+        // Passed through correct portal
         if(playerNum===1)w.p1hit=1;
         else w.p2hit=1;
 
@@ -173,16 +220,10 @@ function upd(p,playerNum){
           p.path.push(w.id);
           p.sc+=100;
           tone(700,100);
-          cam.flash(80,255,255,255);
-        }
-
-        // In 2P mode, check if BOTH passed
-        if(m===1){
-          // If this player passed but other didn't, other player loses
-          // Check after a delay to see if other player also passes
+          // NO flash - removed cam.flash()
         }
       }else{
-        // Hit wall!
+        // Hit wall or wrong portal
         if(p.path.indexOf(w.id)===-1){
           p.path.push(w.id);
           p.alive=0;
@@ -192,20 +233,18 @@ function upd(p,playerNum){
       }
     }
 
-    // In 2P: Check if wall passed both players and only one went through
+    // In 2P: Check if wall passed both players
     if(m===1&&w.y>H-60){
-      if((w.p1hit&&!w.p2hit&&p2.alive)||(w.p2hit&&!w.p1hit&&p1.alive)){
-        // One passed, other didn't - kill the one who didn't pass
-        if(!w.p1hit&&p1.alive){
-          p1.alive=0;
-          cam.shake(400,0.015);
-          tone(120,300);
-        }
-        if(!w.p2hit&&p2.alive){
-          p2.alive=0;
-          cam.shake(400,0.015);
-          tone(120,300);
-        }
+      // Check if each player went through their portal
+      if(!w.p1hit&&p1.alive){
+        p1.alive=0;
+        cam.shake(400,0.015);
+        tone(120,300);
+      }
+      if(!w.p2hit&&p2.alive){
+        p2.alive=0;
+        cam.shake(400,0.015);
+        tone(120,300);
       }
     }
   }
@@ -218,28 +257,48 @@ function draw(){
   for(let w of walls){
     const wallCol=0x666666;
 
-    // Draw wall before portal
-    if(w.portalX>0){
+    // Sort portals by x position for drawing wall segments
+    const sortedPortals=[...w.portals].sort((a,b)=>a.x-b.x);
+
+    // Draw wall before first portal
+    if(sortedPortals[0].x>0){
       g.fillStyle(wallCol);
-      g.fillRect(0,w.y-WALL_THICK/2,w.portalX,WALL_THICK);
+      g.fillRect(0,w.y-WALL_THICK/2,sortedPortals[0].x,WALL_THICK);
     }
 
-    // Draw portal gap with colored outline
-    g.lineStyle(4,w.col);
-    g.strokeRect(w.portalX,w.y-WALL_THICK/2-4,w.portalW,WALL_THICK+8);
+    // Draw portals and wall segments between them
+    for(let i=0;i<sortedPortals.length;i++){
+      const portal=sortedPortals[i];
 
-    // Portal inner glow
-    g.fillStyle(w.col,0.3);
-    g.fillRect(w.portalX,w.y-WALL_THICK/2,w.portalW,WALL_THICK);
+      // Draw portal gap with colored outline
+      g.lineStyle(4,portal.col);
+      g.strokeRect(portal.x,w.y-WALL_THICK/2-4,portal.w,WALL_THICK+8);
 
-    // Safe indicator (white dot)
-    if(w.safe){
-      g.fillStyle(0xffffff);
-      g.fillCircle(w.portalX+w.portalW/2,w.y,6);
+      // Portal inner glow
+      g.fillStyle(portal.col,0.3);
+      g.fillRect(portal.x,w.y-WALL_THICK/2,portal.w,WALL_THICK);
+
+      // Portal indicator dot (white for 1P, colored for 2P)
+      if(m===0){
+        g.fillStyle(0xffffff);
+        g.fillCircle(portal.x+portal.w/2,w.y,6);
+      }
+
+      // Wall segment between portals
+      if(i<sortedPortals.length-1){
+        const nextPortal=sortedPortals[i+1];
+        const segStart=portal.x+portal.w;
+        const segWidth=nextPortal.x-segStart;
+        if(segWidth>0){
+          g.fillStyle(wallCol);
+          g.fillRect(segStart,w.y-WALL_THICK/2,segWidth,WALL_THICK);
+        }
+      }
     }
 
-    // Wall after portal
-    const endX=w.portalX+w.portalW;
+    // Draw wall after last portal
+    const lastPortal=sortedPortals[sortedPortals.length-1];
+    const endX=lastPortal.x+lastPortal.w;
     if(endX<W){
       g.fillStyle(wallCol);
       g.fillRect(endX,w.y-WALL_THICK/2,W-endX,WALL_THICK);
@@ -248,14 +307,14 @@ function draw(){
 
   // Player 1 (simple stick)
   if(p1){
-    const col=p1.alive?0x00ccff:0x444;
+    const col=p1.alive?P1_COLOR:0x444;
     g.lineStyle(STICK_W,col);
     g.lineBetween(p1.x,p1.y,p1.x,p1.y-STICK_H);
   }
 
   // Player 2
   if(p2){
-    const col=p2.alive?0xff9900:0x444;
+    const col=p2.alive?P2_COLOR:0x444;
     g.lineStyle(STICK_W,col);
     g.lineBetween(p2.x,p2.y,p2.x,p2.y-STICK_H);
   }
@@ -282,7 +341,7 @@ function showGame(){
   }else{
     txts.p1sc.setVisible(1);
     txts.p2sc.setVisible(1);
-    txts.help.setVisible(1).setText('BOTH MUST PASS!');
+    txts.help.setVisible(1).setText('MATCH YOUR COLOR!');
   }
   txts.timer.setVisible(1);
   txts.menu.setVisible(1);
