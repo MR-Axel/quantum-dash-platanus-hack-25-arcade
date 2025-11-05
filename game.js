@@ -1,5 +1,5 @@
 // Quantum Dash - Portal Runner
-const W=800,H=600,STICK_H=50,STICK_W=6,WALL_SPACING=280,PORTAL_W=100,WALL_THICK=8;
+const W=800,H=600,STICK_H=40,STICK_W=4,WALL_SPACING=280,PORTAL_W=100,WALL_THICK=8;
 let sc=0,m=0,p1,p2,walls=[],cam,g,spd=2.5,t=0,colors=[0x00ffff,0xff00ff,0xffff00,0xff0000,0x00ff00],nextId=0,snd,txts={},baseSpeed=4;
 
 const P1_COLOR=0x00ccff; // Cyan for P1
@@ -77,6 +77,18 @@ function update(_,dt){
 
   for(let i=walls.length-1;i>=0;i--){
     walls[i].y+=spd;
+
+    // Move portals laterally
+    for(let pt of walls[i].portals){
+      if(pt.vx){
+        pt.x+=pt.vx;
+        // Bounce at edges
+        if(pt.x<50||pt.x>W-pt.w-50){
+          pt.vx*=-1;
+        }
+      }
+    }
+
     if(walls[i].y>H+50)walls.splice(i,1);
   }
 
@@ -96,16 +108,17 @@ function update(_,dt){
   upd(p1,1);
   if(p2)upd(p2,2);
 
-  // Player collision (2P push mechanic)
+  // Player collision (2P push mechanic) - STRONGER
   if(m===1&&p1.alive&&p2.alive){
     const dist=Math.abs(p1.x-p2.x);
-    if(dist<STICK_W+2){
+    if(dist<STICK_W+4){
+      const pushForce=3.5; // Increased from 1.5
       if(p1.x<p2.x){
-        p1.x-=1.5;
-        p2.x+=1.5;
+        p1.x-=pushForce;
+        p2.x+=pushForce;
       }else{
-        p1.x+=1.5;
-        p2.x-=1.5;
+        p1.x+=pushForce;
+        p2.x-=pushForce;
       }
     }
   }
@@ -142,38 +155,63 @@ function update(_,dt){
 }
 
 function spawnWall(){
+  // Calculate portal size based on time (shrinks progressively)
+  let portalSize=PORTAL_W;
+  if(t>30){
+    // After 30s, start shrinking
+    const shrinkFactor=Math.min((t-30)*0.8,PORTAL_W-20); // Never smaller than 20px
+    portalSize=Math.max(20,PORTAL_W-shrinkFactor);
+  }
+
+  // Decide if portals should move (20% chance after 15s)
+  const shouldMove=t>15&&Math.random()<0.2;
+  const moveSpeed=shouldMove?(Math.random()*1.5+0.5)*(Math.random()<0.5?1:-1):0;
+
   if(m===0){
     // 1P: Single portal in random position
-    const minX=50;
-    const maxX=W-PORTAL_W-50;
+    const minX=60;
+    const maxX=W-portalSize-60;
     const portalX=minX+Math.random()*(maxX-minX);
     const prevSafe=walls.length>0?walls.find(w=>w.safe):null;
     const col=prevSafe?prevSafe.col:colors[Math.floor(Math.random()*colors.length)];
 
     walls.push({
       y:-50,
-      portals:[{x:portalX,w:PORTAL_W,col,forP1:1,forP2:0}],
+      portals:[{x:portalX,w:portalSize,col,forP1:1,forP2:0,vx:moveSpeed}],
       id:nextId,
       p1hit:0,
       p2hit:0
     });
   }else{
-    // 2P: Two portals, one for each player
+    // 2P: Variable spacing
     const minX=80;
-    const maxX=W-PORTAL_W-80;
+    const maxX=W-portalSize-80;
 
-    // Generate two random positions ensuring they don't overlap
+    const spacingMode=Math.random();
     let p1X,p2X;
-    do{
+
+    if(spacingMode<0.3){
+      // 30% chance: Same position (both must pass through same portal)
       p1X=minX+Math.random()*(maxX-minX);
-      p2X=minX+Math.random()*(maxX-minX);
-    }while(Math.abs(p1X-p2X)<PORTAL_W+20);
+      p2X=p1X;
+    }else if(spacingMode<0.6){
+      // 30% chance: Close together
+      p1X=minX+Math.random()*(maxX-minX);
+      const offset=(Math.random()*40+10)*(Math.random()<0.5?1:-1);
+      p2X=Math.max(minX,Math.min(maxX,p1X+offset));
+    }else{
+      // 40% chance: Far apart
+      do{
+        p1X=minX+Math.random()*(maxX-minX);
+        p2X=minX+Math.random()*(maxX-minX);
+      }while(Math.abs(p1X-p2X)<portalSize+60);
+    }
 
     walls.push({
       y:-50,
       portals:[
-        {x:p1X,w:PORTAL_W,col:P1_COLOR,forP1:1,forP2:0},
-        {x:p2X,w:PORTAL_W,col:P2_COLOR,forP1:0,forP2:1}
+        {x:p1X,w:portalSize,col:P1_COLOR,forP1:1,forP2:0,vx:moveSpeed},
+        {x:p2X,w:portalSize,col:P2_COLOR,forP1:0,forP2:1,vx:moveSpeed}
       ],
       id:nextId,
       p1hit:0,
@@ -199,10 +237,10 @@ function upd(p,playerNum){
       let hitWrongPortal=0;
 
       // Check each portal
-      for(let portal of w.portals){
-        if(p.x>portal.x&&p.x<portal.x+portal.w){
+      for(let pt of w.portals){
+        if(p.x>pt.x&&p.x<pt.x+pt.w){
           // Player is in this portal
-          if((playerNum===1&&portal.forP1)||(playerNum===2&&portal.forP2)){
+          if((playerNum===1&&pt.forP1)||(playerNum===2&&pt.forP2)){
             hitCorrectPortal=1;
           }else{
             hitWrongPortal=1;
@@ -220,7 +258,6 @@ function upd(p,playerNum){
           p.path.push(w.id);
           p.sc+=100;
           tone(700,100);
-          // NO flash - removed cam.flash()
         }
       }else{
         // Hit wall or wrong portal
@@ -278,10 +315,25 @@ function draw(){
       g.fillStyle(portal.col,0.3);
       g.fillRect(portal.x,w.y-WALL_THICK/2,portal.w,WALL_THICK);
 
-      // Portal indicator dot (white for 1P, colored for 2P)
+      // Portal indicator dot (white for 1P, no dot for 2P)
       if(m===0){
         g.fillStyle(0xffffff);
         g.fillCircle(portal.x+portal.w/2,w.y,6);
+      }
+
+      // Movement indicator (arrow)
+      if(portal.vx){
+        g.fillStyle(0xffffff,0.6);
+        const arrowSize=4;
+        const cx=portal.x+portal.w/2;
+        const cy=w.y;
+        if(portal.vx>0){
+          // Right arrow
+          g.fillTriangle(cx+8,cy,cx+8+arrowSize,cy+arrowSize,cx+8+arrowSize,cy-arrowSize);
+        }else{
+          // Left arrow
+          g.fillTriangle(cx-8,cy,cx-8-arrowSize,cy+arrowSize,cx-8-arrowSize,cy-arrowSize);
+        }
       }
 
       // Wall segment between portals
@@ -305,7 +357,7 @@ function draw(){
     }
   }
 
-  // Player 1 (simple stick)
+  // Player 1 (simple stick - THINNER)
   if(p1){
     const col=p1.alive?P1_COLOR:0x444;
     g.lineStyle(STICK_W,col);
