@@ -1,5 +1,5 @@
 // Quantum Dash - Portal Runner
-const W=800,H=600,STICK_H=40,STICK_W=4,WALL_SPACING=280,PORTAL_W=100,WALL_THICK=8;
+const W=800,H=600,STICK_H=40,STICK_W=4,WALL_SPACING=280,PORTAL_W=100,WALL_THICK=8,MIN_PORTAL=40,MAX_PORTAL=W-120,TROLL_PROB=0.025,TROLL_DIST=150;
 let sc=0,m=0,p1,p2,walls=[],cam,g,spd=2,t=0,colors=[0x00ffff,0xff00ff,0xffff00,0xff0000,0x00ff00],nextId=0,snd,txts={},baseSpeed=3.5;
 
 const P1_COLOR=0x00ccff; // Cyan for P1
@@ -16,6 +16,13 @@ function blendColor(c1,c2,f){
   const g=Math.round(g1+(g2-g1)*f);
   const b=Math.round(b1+(b2-b1)*f);
   return(r<<16)|(g<<8)|b;
+}
+
+function getPortalSize(){
+  const r=Math.random();
+  if(r<0.05)return MAX_PORTAL; // 5% full-width (joke mode)
+  if(r<0.75)return PORTAL_W; // 70% normal size
+  return MIN_PORTAL+Math.random()*(PORTAL_W-MIN_PORTAL)*0.7; // 25% small
 }
 
 function create(){
@@ -79,8 +86,10 @@ function update(_,dt){
     baseSpeed=3.5+Math.min((t-20)*0.02,2.5); // Max speed 6 (instead of 7)
   }
 
-  // Reduce wall spacing as game progresses VERY SLOWLY
-  const currentSpacing=Math.max(230,WALL_SPACING-t*1.2);
+  // Variable wall spacing - calculate minimum safe distance
+  const minSpacing=(baseSpeed+spd)*45; // Reaction time ~45 frames
+  const maxSpacing=minSpacing*2.5;
+  const currentSpacing=minSpacing+Math.random()*(maxSpacing-minSpacing);
 
   if(walls.length===0||walls[walls.length-1].y>currentSpacing)spawnWall();
 
@@ -89,13 +98,24 @@ function update(_,dt){
 
     const w=walls[i];
 
-    // Move portals laterally
+    // Move portals laterally and troll behavior
     for(let pt of w.portals){
       if(pt.vx){
         pt.x+=pt.vx;
         // Bounce at edges
         if(pt.x<50||pt.x>W-pt.w-50){
           pt.vx*=-1;
+        }
+      }
+
+      // Troll portal: moves away when player approaches
+      if(pt.troll&&!pt.trollActive){
+        const distY=Math.abs(w.y-p1.y);
+        const distX=Math.abs(pt.x+pt.w/2-p1.x);
+        if(distY<TROLL_DIST&&distX<80){
+          pt.trollActive=1;
+          pt.vx=(p1.x<pt.x?1:-1)*(baseSpeed*2.5); // Move away fast
+          tone(800,80); // Troll sound
         }
       }
     }
@@ -206,18 +226,22 @@ function update(_,dt){
 }
 
 function spawnWall(){
-  // Calculate portal size based on time (shrinks progressively)
-  let portalSize=PORTAL_W;
-  if(t>40){
-    // After 40s, start shrinking (slower start)
+  // Variable portal size system
+  let portalSize=getPortalSize();
+
+  // Apply progressive shrinking after 40s (only to normal portals)
+  if(t>40&&portalSize===PORTAL_W){
     const shrinkFactor=Math.min((t-40)*0.6,PORTAL_W-20);
     portalSize=Math.max(20,PORTAL_W-shrinkFactor);
   }
 
-  // Decide if portals should move - increase probability over time
-  const moveProb=t>20?Math.min(0.15+(t-20)*0.005,0.4):0;
+  // Decide if portals should move - starts at 10s, increase probability over time
+  const moveProb=t>10?Math.min(0.15+(t-10)*0.005,0.4):0;
   const shouldMove=Math.random()<moveProb;
   const moveSpeed=shouldMove?(Math.random()*1.2+0.4)*(Math.random()<0.5?1:-1):0;
+
+  // Troll portal (only for non-full-width portals)
+  const isTroll=portalSize<MAX_PORTAL&&Math.random()<TROLL_PROB;
 
   if(m===0){
     // 1P: Single portal in random position
@@ -229,7 +253,7 @@ function spawnWall(){
 
     walls.push({
       y:-50,
-      portals:[{x:portalX,w:portalSize,col,forP1:1,forP2:0,vx:moveSpeed}],
+      portals:[{x:portalX,w:portalSize,col,forP1:1,forP2:0,vx:moveSpeed,troll:isTroll,trollActive:0}],
       id:nextId,
       p1hit:0,
       p2hit:0
@@ -263,7 +287,7 @@ function spawnWall(){
     if(p1X===p2X){
       walls.push({
         y:-50,
-        portals:[{x:p1X,w:portalSize,col:UNIFIED_COLOR,forP1:1,forP2:1,vx:moveSpeed,unified:1}],
+        portals:[{x:p1X,w:portalSize,col:UNIFIED_COLOR,forP1:1,forP2:1,vx:moveSpeed,unified:1,troll:isTroll,trollActive:0}],
         id:nextId,
         p1hit:0,
         p2hit:0
@@ -272,8 +296,8 @@ function spawnWall(){
       walls.push({
         y:-50,
         portals:[
-          {x:p1X,w:portalSize,col:P1_COLOR,forP1:1,forP2:0,vx:moveSpeed,unified:0},
-          {x:p2X,w:portalSize,col:P2_COLOR,forP1:0,forP2:1,vx:moveSpeed,unified:0}
+          {x:p1X,w:portalSize,col:P1_COLOR,forP1:1,forP2:0,vx:moveSpeed,unified:0,troll:isTroll,trollActive:0},
+          {x:p2X,w:portalSize,col:P2_COLOR,forP1:0,forP2:1,vx:moveSpeed,unified:0,troll:isTroll,trollActive:0}
         ],
         id:nextId,
         p1hit:0,
@@ -352,53 +376,63 @@ function draw(){
     const wallCol=0x666666;
     const sortedPortals=[...w.portals].sort((a,b)=>a.x-b.x);
 
-    // Draw wall before first portal
-    if(sortedPortals[0].x>0){
-      g.fillStyle(wallCol);
-      g.fillRect(0,w.y-WALL_THICK/2,sortedPortals[0].x,WALL_THICK);
-    }
+    // Check if full-width portal (joke mode)
+    const isFullWidth=sortedPortals[0].w>=MAX_PORTAL;
 
-    // Draw portals and wall segments between them
-    for(let i=0;i<sortedPortals.length;i++){
-      const portal=sortedPortals[i];
+    if(isFullWidth){
+      // Just draw the full-width portal stripe
+      g.fillStyle(sortedPortals[0].col);
+      g.fillRect(60,w.y-WALL_THICK/2,W-120,WALL_THICK);
+    }else{
+      // Normal portal rendering
+      // Draw wall before first portal
+      if(sortedPortals[0].x>0){
+        g.fillStyle(wallCol);
+        g.fillRect(0,w.y-WALL_THICK/2,sortedPortals[0].x,WALL_THICK);
+      }
 
-      // Draw portal as colored stripe (same thickness as wall)
-      g.fillStyle(portal.col);
-      g.fillRect(portal.x,w.y-WALL_THICK/2,portal.w,WALL_THICK);
+      // Draw portals and wall segments between them
+      for(let i=0;i<sortedPortals.length;i++){
+        const portal=sortedPortals[i];
 
-      // Movement indicator (arrow)
-      if(portal.vx){
-        g.fillStyle(0xffffff,0.7);
-        const arrowSize=5;
-        const cx=portal.x+portal.w/2;
-        const cy=w.y;
-        if(portal.vx>0){
-          // Right arrow
-          g.fillTriangle(cx+10,cy,cx+10+arrowSize,cy+arrowSize,cx+10+arrowSize,cy-arrowSize);
-        }else{
-          // Left arrow
-          g.fillTriangle(cx-10,cy,cx-10-arrowSize,cy+arrowSize,cx-10-arrowSize,cy-arrowSize);
+        // Draw portal as colored stripe (same thickness as wall)
+        g.fillStyle(portal.col);
+        g.fillRect(portal.x,w.y-WALL_THICK/2,portal.w,WALL_THICK);
+
+        // Movement indicator (arrow)
+        if(portal.vx){
+          g.fillStyle(0xffffff,0.7);
+          const arrowSize=5;
+          const cx=portal.x+portal.w/2;
+          const cy=w.y;
+          if(portal.vx>0){
+            // Right arrow
+            g.fillTriangle(cx+10,cy,cx+10+arrowSize,cy+arrowSize,cx+10+arrowSize,cy-arrowSize);
+          }else{
+            // Left arrow
+            g.fillTriangle(cx-10,cy,cx-10-arrowSize,cy+arrowSize,cx-10-arrowSize,cy-arrowSize);
+          }
+        }
+
+        // Wall segment between portals
+        if(i<sortedPortals.length-1){
+          const nextPortal=sortedPortals[i+1];
+          const segStart=portal.x+portal.w;
+          const segWidth=nextPortal.x-segStart;
+          if(segWidth>0){
+            g.fillStyle(wallCol);
+            g.fillRect(segStart,w.y-WALL_THICK/2,segWidth,WALL_THICK);
+          }
         }
       }
 
-      // Wall segment between portals
-      if(i<sortedPortals.length-1){
-        const nextPortal=sortedPortals[i+1];
-        const segStart=portal.x+portal.w;
-        const segWidth=nextPortal.x-segStart;
-        if(segWidth>0){
-          g.fillStyle(wallCol);
-          g.fillRect(segStart,w.y-WALL_THICK/2,segWidth,WALL_THICK);
-        }
+      // Draw wall after last portal
+      const lastPortal=sortedPortals[sortedPortals.length-1];
+      const endX=lastPortal.x+lastPortal.w;
+      if(endX<W){
+        g.fillStyle(wallCol);
+        g.fillRect(endX,w.y-WALL_THICK/2,W-endX,WALL_THICK);
       }
-    }
-
-    // Draw wall after last portal
-    const lastPortal=sortedPortals[sortedPortals.length-1];
-    const endX=lastPortal.x+lastPortal.w;
-    if(endX<W){
-      g.fillStyle(wallCol);
-      g.fillRect(endX,w.y-WALL_THICK/2,W-endX,WALL_THICK);
     }
   }
 
