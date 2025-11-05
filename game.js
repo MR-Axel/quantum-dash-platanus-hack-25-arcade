@@ -1,6 +1,6 @@
 // Quantum Dash - Portal Runner
 const W=800,H=600,STICK_H=40,STICK_W=4,WALL_SPACING=280,PORTAL_W=100,WALL_THICK=8;
-let sc=0,m=0,p1,p2,walls=[],cam,g,spd=2.5,t=0,colors=[0x00ffff,0xff00ff,0xffff00,0xff0000,0x00ff00],nextId=0,snd,txts={},baseSpeed=4;
+let sc=0,m=0,p1,p2,walls=[],cam,g,spd=2,t=0,colors=[0x00ffff,0xff00ff,0xffff00,0xff0000,0x00ff00],nextId=0,snd,txts={},baseSpeed=3.5;
 
 const P1_COLOR=0x00ccff; // Cyan for P1
 const P2_COLOR=0xff9900; // Orange for P2
@@ -35,14 +35,14 @@ function create(){
 
   this.input.keyboard.on('keydown-ONE',()=>{if(sc===0)start(this,0)});
   this.input.keyboard.on('keydown-TWO',()=>{if(sc===0)start(this,1)});
-  this.input.keyboard.on('keydown-SPACE',()=>{if(sc===2){sc=0;walls=[];t=0;spd=2.5;baseSpeed=4;nextId=0;showMenu();}});
-  this.input.keyboard.on('keydown-T',()=>{if(sc===1){sc=0;walls=[];t=0;spd=2.5;baseSpeed=4;nextId=0;showMenu();}});
+  this.input.keyboard.on('keydown-SPACE',()=>{if(sc===2){sc=0;walls=[];t=0;spd=2;baseSpeed=3.5;nextId=0;showMenu();}});
+  this.input.keyboard.on('keydown-T',()=>{if(sc===1){sc=0;walls=[];t=0;spd=2;baseSpeed=3.5;nextId=0;showMenu();}});
 
   showMenu();
 }
 
 function start(s,mode){
-  m=mode;sc=1;t=0;spd=2.5;baseSpeed=4;walls=[];nextId=0;
+  m=mode;sc=1;t=0;spd=2;baseSpeed=3.5;walls=[];nextId=0;
   const x1=m===1?W/3:W/2;
   const x2=2*W/3;
   p1={x:x1,vx:0,y:H-80,path:[],alive:1,sc:0};
@@ -62,16 +62,15 @@ function update(_,dt){
 
   t+=dt*0.001;
 
-  // Progressive difficulty - SLOWER acceleration
-  if(t>10)spd=2.5+t*0.08;
-  if(spd>6)spd=6;
+  // Progressive difficulty - VERY SLOW acceleration
+  if(t>20){
+    // Start acceleration after 20s, very gradual
+    spd=2+Math.min((t-20)*0.03,3); // Max speed 5 (instead of 6)
+    baseSpeed=3.5+Math.min((t-20)*0.02,2.5); // Max speed 6 (instead of 7)
+  }
 
-  // Player speed also increases SLOWER
-  if(t>10)baseSpeed=4+t*0.05;
-  if(baseSpeed>7)baseSpeed=7;
-
-  // Reduce wall spacing as game progresses SLOWER
-  const currentSpacing=Math.max(220,WALL_SPACING-t*2);
+  // Reduce wall spacing as game progresses VERY SLOWLY
+  const currentSpacing=Math.max(230,WALL_SPACING-t*1.2);
 
   if(walls.length===0||walls[walls.length-1].y>currentSpacing)spawnWall();
 
@@ -108,11 +107,11 @@ function update(_,dt){
   upd(p1,1);
   if(p2)upd(p2,2);
 
-  // Player collision (2P push mechanic) - STRONGER
+  // Player collision (2P push mechanic)
   if(m===1&&p1.alive&&p2.alive){
     const dist=Math.abs(p1.x-p2.x);
     if(dist<STICK_W+4){
-      const pushForce=3.5; // Increased from 1.5
+      const pushForce=3.5;
       if(p1.x<p2.x){
         p1.x-=pushForce;
         p2.x+=pushForce;
@@ -125,14 +124,12 @@ function update(_,dt){
 
   // Check game over conditions
   if(m===0){
-    // 1P: Just check if dead
     if(!p1.alive){
       sc=2;
       tone(150,400);
       showEnd();
     }
   }else{
-    // 2P: If one dies, other wins
     if(!p1.alive||!p2.alive){
       sc=2;
       tone(150,400);
@@ -143,11 +140,9 @@ function update(_,dt){
   draw();
 
   if(m===0){
-    // 1P: Show score
     if(p1)txts.p1sc.setText(`Score: ${p1.sc}`);
     txts.timer.setText(`Time: ${t.toFixed(1)}s`);
   }else{
-    // 2P: Show status for each
     txts.timer.setText(`Time: ${t.toFixed(1)}s`);
     if(p1)txts.p1sc.setText(`P1: ${p1.alive?'ALIVE':'DEAD'}`);
     if(p2)txts.p2sc.setText(`P2: ${p2.alive?'ALIVE':'DEAD'}`);
@@ -157,15 +152,15 @@ function update(_,dt){
 function spawnWall(){
   // Calculate portal size based on time (shrinks progressively)
   let portalSize=PORTAL_W;
-  if(t>30){
-    // After 30s, start shrinking
-    const shrinkFactor=Math.min((t-30)*0.8,PORTAL_W-20); // Never smaller than 20px
+  if(t>40){
+    // After 40s, start shrinking (slower start)
+    const shrinkFactor=Math.min((t-40)*0.6,PORTAL_W-20);
     portalSize=Math.max(20,PORTAL_W-shrinkFactor);
   }
 
-  // Decide if portals should move (20% chance after 15s)
-  const shouldMove=t>15&&Math.random()<0.2;
-  const moveSpeed=shouldMove?(Math.random()*1.5+0.5)*(Math.random()<0.5?1:-1):0;
+  // Decide if portals should move (15% chance after 20s)
+  const shouldMove=t>20&&Math.random()<0.15;
+  const moveSpeed=shouldMove?(Math.random()*1.2+0.4)*(Math.random()<0.5?1:-1):0;
 
   if(m===0){
     // 1P: Single portal in random position
@@ -191,7 +186,7 @@ function spawnWall(){
     let p1X,p2X;
 
     if(spacingMode<0.3){
-      // 30% chance: Same position (both must pass through same portal)
+      // 30% chance: Same position
       p1X=minX+Math.random()*(maxX-minX);
       p2X=p1X;
     }else if(spacingMode<0.6){
@@ -229,28 +224,21 @@ function upd(p,playerNum){
   if(p.x>W-10)p.x=W-10;
 
   for(let w of walls){
-    // Check which player hit this wall
     const alreadyHit=playerNum===1?w.p1hit:w.p2hit;
 
     if(Math.abs(w.y-p.y)<25&&!alreadyHit){
       let hitCorrectPortal=0;
-      let hitWrongPortal=0;
 
-      // Check each portal
       for(let pt of w.portals){
         if(p.x>pt.x&&p.x<pt.x+pt.w){
-          // Player is in this portal
           if((playerNum===1&&pt.forP1)||(playerNum===2&&pt.forP2)){
             hitCorrectPortal=1;
-          }else{
-            hitWrongPortal=1;
           }
           break;
         }
       }
 
       if(hitCorrectPortal){
-        // Passed through correct portal
         if(playerNum===1)w.p1hit=1;
         else w.p2hit=1;
 
@@ -260,7 +248,6 @@ function upd(p,playerNum){
           tone(700,100);
         }
       }else{
-        // Hit wall or wrong portal
         if(p.path.indexOf(w.id)===-1){
           p.path.push(w.id);
           p.alive=0;
@@ -272,7 +259,6 @@ function upd(p,playerNum){
 
     // In 2P: Check if wall passed both players
     if(m===1&&w.y>H-60){
-      // Check if each player went through their portal
       if(!w.p1hit&&p1.alive){
         p1.alive=0;
         cam.shake(400,0.015);
@@ -293,8 +279,6 @@ function draw(){
   // Draw walls with portal gaps
   for(let w of walls){
     const wallCol=0x666666;
-
-    // Sort portals by x position for drawing wall segments
     const sortedPortals=[...w.portals].sort((a,b)=>a.x-b.x);
 
     // Draw wall before first portal
@@ -307,32 +291,22 @@ function draw(){
     for(let i=0;i<sortedPortals.length;i++){
       const portal=sortedPortals[i];
 
-      // Draw portal gap with colored outline
-      g.lineStyle(4,portal.col);
-      g.strokeRect(portal.x,w.y-WALL_THICK/2-4,portal.w,WALL_THICK+8);
-
-      // Portal inner glow
-      g.fillStyle(portal.col,0.3);
+      // Draw portal as colored stripe (same thickness as wall)
+      g.fillStyle(portal.col);
       g.fillRect(portal.x,w.y-WALL_THICK/2,portal.w,WALL_THICK);
-
-      // Portal indicator dot (white for 1P, no dot for 2P)
-      if(m===0){
-        g.fillStyle(0xffffff);
-        g.fillCircle(portal.x+portal.w/2,w.y,6);
-      }
 
       // Movement indicator (arrow)
       if(portal.vx){
-        g.fillStyle(0xffffff,0.6);
-        const arrowSize=4;
+        g.fillStyle(0xffffff,0.7);
+        const arrowSize=5;
         const cx=portal.x+portal.w/2;
         const cy=w.y;
         if(portal.vx>0){
           // Right arrow
-          g.fillTriangle(cx+8,cy,cx+8+arrowSize,cy+arrowSize,cx+8+arrowSize,cy-arrowSize);
+          g.fillTriangle(cx+10,cy,cx+10+arrowSize,cy+arrowSize,cx+10+arrowSize,cy-arrowSize);
         }else{
           // Left arrow
-          g.fillTriangle(cx-8,cy,cx-8-arrowSize,cy+arrowSize,cx-8-arrowSize,cy-arrowSize);
+          g.fillTriangle(cx-10,cy,cx-10-arrowSize,cy+arrowSize,cx-10-arrowSize,cy-arrowSize);
         }
       }
 
@@ -357,7 +331,7 @@ function draw(){
     }
   }
 
-  // Player 1 (simple stick - THINNER)
+  // Player 1 (simple stick)
   if(p1){
     const col=p1.alive?P1_COLOR:0x444;
     g.lineStyle(STICK_W,col);
@@ -389,7 +363,7 @@ function showGame(){
   hideAll();
   if(m===0){
     txts.p1sc.setVisible(1);
-    txts.help.setVisible(1).setText('WHITE DOT = SAFE!');
+    txts.help.setVisible(1).setText('Go through colored stripes!');
   }else{
     txts.p1sc.setVisible(1);
     txts.p2sc.setVisible(1);
@@ -409,10 +383,8 @@ function showEnd(){
   txts.restart.setVisible(1);
 
   if(m===0){
-    // 1P: Show score and time
     txts.p1end.setVisible(1).setText(`Score: ${p1.sc} pts | Time: ${t.toFixed(1)}s`);
   }else{
-    // 2P: Show who won based on who survived
     txts.timer.setVisible(1);
 
     if(p1.alive&&!p2.alive){
@@ -424,7 +396,6 @@ function showEnd(){
       txts.p1end.setVisible(1).setText('P1: Died');
       txts.p2end.setVisible(1).setText('P2: Survived');
     }else{
-      // Both died at same time
       txts.win.setVisible(1).setText('DRAW!');
       txts.p1end.setVisible(1).setText('P1: Died');
       txts.p2end.setVisible(1).setText('P2: Died');
