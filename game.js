@@ -4,9 +4,19 @@ let sc=0,m=0,p1,p2,walls=[],cam,g,spd=2,t=0,colors=[0x00ffff,0xff00ff,0xffff00,0
 
 const P1_COLOR=0x00ccff; // Cyan for P1
 const P2_COLOR=0xff9900; // Orange for P2
+const UNIFIED_COLOR=0x9933ff; // Violet for unified portal
 
 const cfg={type:Phaser.AUTO,width:W,height:H,backgroundColor:'#000',scene:{create,update}};
 new Phaser.Game(cfg);
+
+function blendColor(c1,c2,f){
+  const r1=(c1>>16)&0xff,g1=(c1>>8)&0xff,b1=c1&0xff;
+  const r2=(c2>>16)&0xff,g2=(c2>>8)&0xff,b2=c2&0xff;
+  const r=Math.round(r1+(r2-r1)*f);
+  const g=Math.round(g1+(g2-g1)*f);
+  const b=Math.round(b1+(b2-b1)*f);
+  return(r<<16)|(g<<8)|b;
+}
 
 function create(){
   this.g=this.add.graphics();
@@ -21,7 +31,7 @@ function create(){
   txts.hint1=this.add.text(W/2,H/2+140,'Go through COLORED portal!',{fontSize:'18px',color:'#ff0',fontFamily:'monospace'}).setOrigin(0.5);
   txts.hint2=this.add.text(W/2,H/2+165,'2P: Each color for each player!',{fontSize:'16px',color:'#aaa',fontFamily:'monospace'}).setOrigin(0.5);
   txts.hint3=this.add.text(W/2,H/2+190,'Hit wall = DEATH!',{fontSize:'18px',color:'#f55',fontFamily:'monospace'}).setOrigin(0.5);
-  txts.ctrl=this.add.text(W/2,H-40,'P1: ← → | P2: A D',{fontSize:'16px',color:'#888',fontFamily:'monospace'}).setOrigin(0.5);
+  txts.ctrl=this.add.text(W/2,H-40,'P1: ← → ↑ ↓ | P2: A D W S',{fontSize:'16px',color:'#888',fontFamily:'monospace'}).setOrigin(0.5);
   txts.p1sc=this.add.text(20,20,'',{fontSize:'20px',color:'#0af',fontFamily:'monospace'}).setOrigin(0);
   txts.p2sc=this.add.text(W-150,20,'',{fontSize:'20px',color:'#f90',fontFamily:'monospace'}).setOrigin(0);
   txts.timer=this.add.text(W/2,20,'',{fontSize:'24px',color:'#fff',fontFamily:'monospace'}).setOrigin(0.5);
@@ -45,8 +55,8 @@ function start(s,mode){
   m=mode;sc=1;t=0;spd=2;baseSpeed=3.5;walls=[];nextId=0;
   const x1=m===1?W/3:W/2;
   const x2=2*W/3;
-  p1={x:x1,vx:0,y:H-80,path:[],alive:1,sc:0};
-  if(m===1)p2={x:x2,vx:0,y:H-80,path:[],alive:1,sc:0};
+  p1={x:x1,vx:0,y:H-80,vy:0,path:[],alive:1,sc:0};
+  if(m===1)p2={x:x2,vx:0,y:H-80,vy:0,path:[],alive:1,sc:0};
   else p2=null;
 
   // First wall
@@ -77,8 +87,10 @@ function update(_,dt){
   for(let i=walls.length-1;i>=0;i--){
     walls[i].y+=spd;
 
+    const w=walls[i];
+
     // Move portals laterally
-    for(let pt of walls[i].portals){
+    for(let pt of w.portals){
       if(pt.vx){
         pt.x+=pt.vx;
         // Bounce at edges
@@ -88,7 +100,43 @@ function update(_,dt){
       }
     }
 
-    if(walls[i].y>H+50)walls.splice(i,1);
+    // Portal collision and merging (2P only)
+    if(m===1&&w.portals.length===2&&!w.portals[0].unified){
+      const p1p=w.portals[0];
+      const p2p=w.portals[1];
+
+      // Check overlap
+      const overlap=Math.max(0,Math.min(p1p.x+p1p.w,p2p.x+p2p.w)-Math.max(p1p.x,p2p.x));
+
+      if(overlap>0){
+        // Portals are overlapping
+        const collisionType=Math.random();
+
+        if(collisionType<0.5){
+          // Bounce off each other
+          if(p1p.vx&&p2p.vx){
+            p1p.vx*=-1;
+            p2p.vx*=-1;
+          }
+        }else{
+          // Merge - blend colors to violet in overlapping area
+          // Calculate blending factor based on overlap
+          const blendFactor=Math.min(overlap/p1p.w,1);
+
+          // Gradually turn violet
+          if(blendFactor>0.3){
+            p1p.col=blendColor(P1_COLOR,UNIFIED_COLOR,blendFactor);
+            p2p.col=blendColor(P2_COLOR,UNIFIED_COLOR,blendFactor);
+          }
+        }
+      }else if(overlap===0){
+        // Reset colors when separated
+        if(p1p.col!==P1_COLOR)p1p.col=P1_COLOR;
+        if(p2p.col!==P2_COLOR)p2p.col=P2_COLOR;
+      }
+    }
+
+    if(w.y>H+50)walls.splice(i,1);
   }
 
   const k=this.input.keyboard;
@@ -96,12 +144,20 @@ function update(_,dt){
     if(k.addKey('LEFT').isDown)p1.vx=-baseSpeed;
     else if(k.addKey('RIGHT').isDown)p1.vx=baseSpeed;
     else p1.vx*=0.85;
+
+    if(k.addKey('UP').isDown)p1.vy=-baseSpeed;
+    else if(k.addKey('DOWN').isDown)p1.vy=baseSpeed;
+    else p1.vy*=0.85;
   }
 
   if(p2&&p2.alive){
     if(k.addKey('A').isDown)p2.vx=-baseSpeed;
     else if(k.addKey('D').isDown)p2.vx=baseSpeed;
     else p2.vx*=0.85;
+
+    if(k.addKey('W').isDown)p2.vy=-baseSpeed;
+    else if(k.addKey('S').isDown)p2.vy=baseSpeed;
+    else p2.vy*=0.85;
   }
 
   upd(p1,1);
@@ -158,8 +214,9 @@ function spawnWall(){
     portalSize=Math.max(20,PORTAL_W-shrinkFactor);
   }
 
-  // Decide if portals should move (15% chance after 20s)
-  const shouldMove=t>20&&Math.random()<0.15;
+  // Decide if portals should move - increase probability over time
+  const moveProb=t>20?Math.min(0.15+(t-20)*0.005,0.4):0;
+  const shouldMove=Math.random()<moveProb;
   const moveSpeed=shouldMove?(Math.random()*1.2+0.4)*(Math.random()<0.5?1:-1):0;
 
   if(m===0){
@@ -186,7 +243,7 @@ function spawnWall(){
     let p1X,p2X;
 
     if(spacingMode<0.3){
-      // 30% chance: Same position
+      // 30% chance: Same position - unified violet portal
       p1X=minX+Math.random()*(maxX-minX);
       p2X=p1X;
     }else if(spacingMode<0.6){
@@ -202,16 +259,27 @@ function spawnWall(){
       }while(Math.abs(p1X-p2X)<portalSize+60);
     }
 
-    walls.push({
-      y:-50,
-      portals:[
-        {x:p1X,w:portalSize,col:P1_COLOR,forP1:1,forP2:0,vx:moveSpeed},
-        {x:p2X,w:portalSize,col:P2_COLOR,forP1:0,forP2:1,vx:moveSpeed}
-      ],
-      id:nextId,
-      p1hit:0,
-      p2hit:0
-    });
+    // If portals are in same position, create unified violet portal
+    if(p1X===p2X){
+      walls.push({
+        y:-50,
+        portals:[{x:p1X,w:portalSize,col:UNIFIED_COLOR,forP1:1,forP2:1,vx:moveSpeed,unified:1}],
+        id:nextId,
+        p1hit:0,
+        p2hit:0
+      });
+    }else{
+      walls.push({
+        y:-50,
+        portals:[
+          {x:p1X,w:portalSize,col:P1_COLOR,forP1:1,forP2:0,vx:moveSpeed,unified:0},
+          {x:p2X,w:portalSize,col:P2_COLOR,forP1:0,forP2:1,vx:moveSpeed,unified:0}
+        ],
+        id:nextId,
+        p1hit:0,
+        p2hit:0
+      });
+    }
   }
   nextId++;
 }
@@ -220,8 +288,11 @@ function upd(p,playerNum){
   if(!p||!p.alive)return;
 
   p.x+=p.vx;
+  p.y+=p.vy;
   if(p.x<10)p.x=10;
   if(p.x>W-10)p.x=W-10;
+  if(p.y<60)p.y=60;
+  if(p.y>H-40)p.y=H-40;
 
   for(let w of walls){
     const alreadyHit=playerNum===1?w.p1hit:w.p2hit;
